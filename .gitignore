@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+venv/
+env/
+
+# Google OAuth
+credentials.json
+token.json
+
+# Runtime data
+data/
+config/home.json
+*.pt
+*.log
