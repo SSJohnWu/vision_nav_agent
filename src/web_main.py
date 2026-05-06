@@ -285,40 +285,79 @@ def add_schedule(payload: ScheduleEventPayload):
 @app.post("/api/schedule_voice")
 def add_schedule_voice(payload: CommandPayload):
     """
-    接收自然語言語音轉文字內容，用 OpenClaw 解析時間地點後建立 Google Calendar 事件
+    接收自然語言語音轉文字內容，用 Python 解析時間地點後建立 Google Calendar 事件
     """
     text = payload.command
     print(f"\n[📅 行事曆語音新增] 收到文字: {text}")
 
     try:
-        # 讓 OpenClaw 解析自然語言
-        prompt = (
-            f"請從以下文字解析出行事曆事件資訊，返回繁體中文 JSON。"
-            f"只返回 JSON，不要有任何其他解釋。\n"
-            f"輸入：「{text}」\n"
-            f"JSON 格式：{{\"title\": \"事件標題\", \"start\": \"ISO 8601 開始時間\", \"end\": \"ISO 8601 結束時間\", \"location\": \"地點\"}}"
-        )
-        raw = vision_analyzer.chat_text(prompt, timeout_s=30)
-        if not raw:
-            return {"ok": False, "error": "OpenClaw 無回覆"}
+        from dateutil import parser as dateparser
+        from datetime import datetime, timedelta
+        import re
 
-        # 解析 JSON 回覆
-        import re, json
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if not match:
-            return {"ok": False, "error": f"無法解析回覆: {raw}"}
+        now = datetime.now()
 
-        parsed = json.loads(match.group())
-        title = parsed.get("title", text)
-        start_str = parsed.get("start")
-        end_str = parsed.get("end")
-        location = parsed.get("location")
+        # 解析相對時間關鍵字
+        text_lower = text.lower()
 
-        if not start_str:
-            return {"ok": False, "error": "無法解析時間"}
+        # 計算日期
+        if any(k in text_lower for k in ['明天', '明日']):
+            base_date = now + timedelta(days=1)
+        elif any(k in text_lower for k in ['後天']):
+            base_date = now + timedelta(days=2)
+        elif any(k in text_lower for k in ['下禮拜', '下週', '下个星期']):
+            base_date = now + timedelta(days=7 - now.weekday())
+        elif any(k in text_lower for k in ['禮拜', '週', '星期']):
+            # 找出「禮拜X」中的數字
+            weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6, '天': 6}
+            for k, v in weekday_map.items():
+                if k in text_lower:
+                    days_ahead = (v - now.weekday()) % 7
+                    if days_ahead == 0: days_ahead = 7
+                    base_date = now + timedelta(days=days_ahead)
+                    break
+            else:
+                base_date = now
+        else:
+            base_date = now
 
-        start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-        end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00")) if end_str else None
+        # 解析時間（時:分）
+        time_match = re.search(r'(\d{1,2})[點过:](\d{0,2})', text)
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2)) if time_match.group(2) else 0
+        else:
+            # 早上/下午/中午/晚上 預設
+            if any(k in text_lower for k in ['早上', '上午']):
+                hour, minute = 9, 0
+            elif any(k in text_lower for k in ['中午']):
+                hour, minute = 12, 0
+            elif any(k in text_lower for k in ['下午']):
+                hour, minute = 14, 0
+            elif any(k in text_lower for k in ['晚上', '夜間']):
+                hour, minute = 19, 0
+            else:
+                hour, minute = 9, 0
+
+        # 開始時間
+        start_dt = datetime(base_date.year, base_date.month, base_date.day, hour, minute)
+
+        # 結束時間（預設 +1 小時）
+        end_dt = start_dt + timedelta(hours=1)
+
+        # 標題：移除時間相關關鍵字
+        title = text
+        for kw in ['明天', '明日', '後天', '今天', '早上', '上午', '中午', '下午', '晚上', '夜間',
+                   '點', '過', ':', '禮拜', '週', '星期', '下禮拜', '下週', '下个星期']:
+            title = re.sub(kw, '', title)
+        title = re.sub(r'\d{1,2}[點过:]\d{0,2}', '', title).strip()
+        if not title:
+            title = '新事件'
+
+        location = None
+        loc_match = re.search(r'在(.+?)[，,]|$', text)
+        if loc_match and loc_match.group(1):
+            location = loc_match.group(1).strip()
 
         client = get_calendar_client()
         event = client.add_event(
@@ -327,7 +366,7 @@ def add_schedule_voice(payload: CommandPayload):
             end=end_dt,
             location=location,
         )
-        print(f"[📅 行事曆事件已建立] {title}")
+        print(f"[📅 行事曆事件已建立] {title} @ {start_dt}")
         return {"ok": True, "event_id": event.get("id"), "title": title}
     except FileNotFoundError as e:
         return {"ok": False, "error": str(e)}
