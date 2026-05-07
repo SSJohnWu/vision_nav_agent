@@ -56,7 +56,7 @@ class VisionAnalyzer:
                     "minProtocol": 3, "maxProtocol": 3,
                     "client": {"id": "cli", "version": "1.0", "platform": "windows", "mode": "cli"},
                     "role": "operator",
-                    "scopes": ["operator.read"],
+                    "scopes": ["operator.read", "operator.write"],
                     "caps": [], "commands": [], "permissions": {},
                     "auth": {"token": self.token},
                     "locale": "zh-TW",

@@ -169,50 +169,27 @@ async def process_photo_command(payload: PhotoCommandPayload):
             voice.speak("無法解讀圖片")
             return {"reply": "無法解讀圖片", "text": payload.text}
 
-        result = vision_analyzer.send_photo(frame)
-
-        # 不論辨識成功與否都寫入 PhotoJournal，方便每日總結
+        # 寫入 PhotoJournal（保留記錄）
         from storage.photo_journal import save_photo
         try:
             journal_entry = save_photo(
                 image_bytes=img_bytes,
                 lat=payload.lat,
                 lng=payload.lng,
-                recognition=result if isinstance(result, dict) else None,
+                recognition=None,
             )
             print(f"[📝 PhotoJournal] 寫入 #{journal_entry['id']}")
         except Exception as je:
             print(f"[📝 PhotoJournal 寫入失敗] {je}")
 
-        if result:
-            # 【優化】根據不同回傳格式調整回覆內容
-            if isinstance(result, dict) and "product_name" in result:
-                summary = result.get("summary", "")
-                price = result.get("price", "")
-                reply = f"已找到商品：{result['product_name']}，價格{price}元，{summary}"
-            elif isinstance(result, dict) and "raw" in result:
-                reply = f"已找到商品：{result['raw']}"
-            else:
-                reply = f"已找到商品：{result}"
-
-            voice.speak(reply)
-
-            # 發送到 Telegram (Bot API 直連，不再走 openclaw CLI)
-            try:
-                telegram_msg = (
-                    f"🛒 已找到商品：{result.get('product_name', reply)}\n"
-                    f"💰 價格：{result.get('price', '未知')}元\n"
-                    f"⭐ 評價：{result.get('reviews', '未知')}\n"
-                    f"🔗 購買連結：{result.get('link', '無')}"
-                )
-                telegram_client.send_message(telegram_msg)
-            except Exception as te:
-                print(f"[📸 Telegram 發送失敗] {te}")
-
-            return {"reply": reply, "text": payload.text, "photo_result": result}
-        else:
-            voice.speak("無法辨識商品，請稍後再試")
-            return {"reply": "無法辨識商品", "text": payload.text}
+        # 語音引導使用者去 Telegram 發送照片給 Bot
+        voice.speak("請到 Telegram 發送照片給 Bot，進行商品辨識")
+        bot_username = "tempo_casing_bot"
+        return {
+            "reply": f"請到 Telegram 傳送照片給 @{bot_username}，Bot 會自動回覆商品分析結果",
+            "text": payload.text,
+            "telegram_bot": bot_username
+        }
 
     except Exception as e:
         print(f"[📸 拍照處理失敗] {e}")
